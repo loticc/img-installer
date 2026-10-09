@@ -8,10 +8,8 @@ on:
         required: true
         default: 'https://default.example.com/file.img.gz'
 
-# 显式添加权限，确保 Release 发布正常
 permissions:
   contents: write
-
 
 jobs:
   build-release:
@@ -48,10 +46,15 @@ jobs:
           download_url="${{ github.event.inputs.download_url }}"
           ./custom.sh "$download_url"
 
+      # ✅ 以下是替换后的两个 step，其余部分完全不变
+      - name: "Get Date"
+        run: echo "DATESTAMP=$(TZ='Asia/Shanghai' date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+
       - name: "Publish"
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: "Custom-Installer-x86_64-ISO"
+          tag_name: "custom-installer-${{ env.DATESTAMP }}"
+          name: "Custom Installer x86_64 ISO (${{ env.DATESTAMP }})"
           body_path: "${{ github.workspace }}/supportFiles/custom/info.md"
           files: |
             output/custom-installer-x86_64.iso
