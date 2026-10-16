@@ -39,11 +39,17 @@ mkdir -p imm output
 
 DOWNLOAD_FILE="$SCRIPT_DIR/imm/$filename"
 CUSTOM_IMAGE="$SCRIPT_DIR/imm/custom.img"
-ORIGINAL_OUTPUT="$SCRIPT_DIR/output/custom-installer-x86_64.iso"
+ORIGINAL_OUTPUT="$SCRIPT_DIR/output/custom2-installer-x86_64.iso"
 FINAL_OUTPUT="$SCRIPT_DIR/output/custom2-installer-x86_64.iso"
+
+echo ""
+echo "检查构建输出文件："
+find "$SCRIPT_DIR/output" -maxdepth 1 -type f \
+    -printf '%f (%s bytes)\n' || true
 
 if [[ ! -s "$FINAL_OUTPUT" ]]; then
     echo "错误：没有生成 Custom2 安装器 ISO。"
+    echo "请检查上方 Docker 构建日志，确认构建器是否成功。"
     exit 1
 fi
 
