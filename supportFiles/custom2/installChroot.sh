@@ -21,7 +21,15 @@ update-locale LANG=en_US.UTF-8
 
 echo Install packages
 apt-get install -y --no-install-recommends linux-image-amd64 live-boot systemd-sysv
-apt-get install -y parted openssh-server bash-completion cifs-utils curl dbus dosfstools firmware-linux-free gddrescue gdisk iputils-ping isc-dhcp-client less nfs-common ntfs-3g openssh-client open-vm-tools procps vim wimtools wget
+
+# 原有工具 + ISO 转硬盘启动所需工具
+apt-get install -y \
+  parted openssh-server bash-completion cifs-utils curl dbus \
+  dosfstools firmware-linux-free gddrescue gdisk iputils-ping \
+  isc-dhcp-client less nfs-common ntfs-3g openssh-client \
+  open-vm-tools procps vim wimtools wget \
+  e2fsprogs file util-linux \
+  grub-pc grub-efi-amd64 grub-efi-amd64-bin grub2-common
 
 echo Clean apt post-install
 apt-get clean
