@@ -1,0 +1,95 @@
+
+name: "Build Custom2 Image Installer ISO"
+
+on:
+  workflow_dispatch:
+    inputs:
+      download_url:
+        description: "请输入镜像下载地址（.img.gz/.img.xz/.img.zip/.iso）"
+        required: true
+        type: string
+        default: "https://default.example.com/file.iso"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: "Build and Release Custom2"
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set executable permissions
+        run: |
+          chmod +x ./custom2.sh
+          chmod +x ./supportFiles/custom/build.sh
+
+      - name: Validate Download URL
+        env:
+          DOWNLOAD_URL: ${{ inputs.download_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$DOWNLOAD_URL" == "https://default.example.com/file.iso" ]]; then
+            echo "错误：请填写实际的镜像下载地址。"
+            exit 1
+          fi
+
+          if [[ ! "$DOWNLOAD_URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo "错误：下载地址必须使用 HTTPS。"
+            exit 1
+          fi
+
+          url_path="${DOWNLOAD_URL%%#*}"
+          url_path="${url_path%%\?*}"
+
+          case "${url_path,,}" in
+            *.img.gz|*.img.xz|*.img.zip|*.iso)
+              echo "镜像地址格式检查通过。"
+              ;;
+            *)
+              echo "错误：仅支持 .img.gz、.img.xz、.img.zip 和 .iso。"
+              exit 1
+              ;;
+          esac
+
+      - name: Build Custom2 Image Installer
+        env:
+          DOWNLOAD_URL: ${{ inputs.download_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./custom2.sh "$DOWNLOAD_URL"
+
+      - name: Get Date
+        shell: bash
+        run: |
+          echo "DATESTAMP=$(TZ='Asia/Shanghai' date +'%Y%m%d-%H%M%S')-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Publish Custom2 Release
+        uses: softprops/action-gh-release@v2.2.1
+        with:
+          tag_name: "custom2-installer-${{ env.DATESTAMP }}"
+          name: "Custom2 Image Installer ISO (${{ env.DATESTAMP }})"
+          body: |
+            Custom2 Image Installer ISO
+
+            Supported payloads:
+            - .img.gz
+            - .img.xz
+            - .img.zip
+            - .iso
+
+            The embedded payload is written directly to the selected target disk.
+            All existing data on the target disk may be erased.
+            Only use images compatible with direct disk writing.
+          files: |
+            output/custom2-installer-x86_64.iso
+            output/custom2-installer-x86_64.iso.sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
