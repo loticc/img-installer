@@ -141,7 +141,8 @@ if [[ ! -s "$FINAL_OUTPUT" ]]; then
     exit 1
 fi
 
-chmod 0644 "$FINAL_OUTPUT"
+# 注意：不要在容器外 chmod，文件由容器内 root 生成，宿主机无权限修改
+# 容器内的 build.sh 已经设置过 0644
 sha256sum "$FINAL_OUTPUT" > "$FINAL_OUTPUT.sha256"
 
 echo ""
