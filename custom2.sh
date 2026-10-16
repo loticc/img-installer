@@ -138,7 +138,7 @@ docker run --privileged --rm \
     -v "$SCRIPT_DIR/supportFiles:/supportFiles:ro" \
     -v "$CUSTOM_IMAGE:/mnt/custom.img:ro" \
     debian:buster \
-    /supportFiles/custom/build.sh
+    /supportFiles/custom2/build.sh
 
 # Rename the generated artifact so it cannot be confused
 # with a Release created by the original workflow.
