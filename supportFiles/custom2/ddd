@@ -9,12 +9,11 @@ show_menu() {
     echo "=========================================="
     echo "       Custom2 Image Installer"
     echo "=========================================="
-    echo "1. Write embedded IMG / ISO to disk"
+    echo "1. Write embedded image to disk"
     echo "0. Quit"
     echo "=========================================="
 }
 
-# Detect the physical disk containing the live installation medium.
 detect_live_disk() {
     local src real typ parent
 
@@ -39,7 +38,6 @@ detect_live_disk() {
     esac
 }
 
-# Return success if the disk or one of its partitions is mounted.
 has_mounted_filesystems() {
     lsblk -nrpo MOUNTPOINT "$1" 2>/dev/null |
         grep -qE '[^[:space:]]'
@@ -60,13 +58,11 @@ select_disk() {
     for disk in "${all_disks[@]}"; do
         real="$(readlink -f -- "$disk")"
 
-        # Do not offer the known live boot disk.
         if [[ -n "$LIVE_DISK" && "$real" == "$LIVE_DISK" ]]; then
             echo "Skipping live boot disk: $disk" >&2
             continue
         fi
 
-        # Avoid writing to disks with mounted filesystems.
         if has_mounted_filesystems "$disk"; then
             echo "Skipping disk with mounted filesystems: $disk" >&2
             continue
@@ -107,6 +103,193 @@ select_disk() {
     done
 }
 
+# 判断是否为 ISO 文件
+is_iso_image() {
+    local f="$1"
+    local desc
+    desc="$(file -b -- "$f" 2>/dev/null || true)"
+    [[ "$desc" == *"ISO 9660"* ]] || [[ "$desc" == *"ISO9660"* ]]
+}
+
+# 原始磁盘镜像：直接 dd
+write_raw_image() {
+    local target_disk="$1"
+
+    echo ""
+    echo "Detected raw disk image. Writing with dd..."
+    echo "Do not power off the system."
+
+    if ! dd \
+        if="$IMAGE_FILE" \
+        of="$target_disk" \
+        bs=4M \
+        conv=fsync \
+        status=progress; then
+        echo ""
+        echo "ERROR: Image writing failed."
+        return 1
+    fi
+
+    sync
+    echo "Raw image written successfully."
+}
+
+# ISO：分区 + 复制内容 + 安装 GRUB（尽量做成可从硬盘启动）
+write_iso_as_bootable_disk() {
+    local target_disk="$1"
+    local part_prefix part1 part2
+    local mnt_iso mnt_root mnt_esp
+
+    echo ""
+    echo "Detected ISO image."
+    echo "Converting to hard-disk bootable layout (partition + GRUB)..."
+    echo "Do not power off the system."
+
+    # 命名分区设备（兼容 /dev/sda 和 /dev/nvme0n1）
+    if [[ "$target_disk" =~ [0-9]$ ]]; then
+        part_prefix="${target_disk}p"
+    else
+        part_prefix="${target_disk}"
+    fi
+    part1="${part_prefix}1"
+    part2="${part_prefix}2"
+
+    mnt_iso="$(mktemp -d /tmp/iso.XXXXXX)"
+    mnt_root="$(mktemp -d /tmp/root.XXXXXX)"
+    mnt_esp="$(mktemp -d /tmp/esp.XXXXXX)"
+
+    cleanup() {
+        umount "$mnt_iso" 2>/dev/null || true
+        umount "$mnt_root" 2>/dev/null || true
+        umount "$mnt_esp" 2>/dev/null || true
+        rmdir "$mnt_iso" "$mnt_root" "$mnt_esp" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    # 挂载 ISO（只读）
+    if ! mount -o loop,ro "$IMAGE_FILE" "$mnt_iso"; then
+        echo "ERROR: Failed to mount ISO."
+        return 1
+    fi
+
+    # 清空目标盘并建立 GPT：1=ESP(512M) 2=其余
+    echo "Partitioning $target_disk ..."
+    wipefs -a "$target_disk" 2>/dev/null || true
+    sgdisk --zap-all "$target_disk" >/dev/null
+    sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI" "$target_disk" >/dev/null
+    sgdisk -n 2:0:0     -t 2:8300 -c 2:"ROOT" "$target_disk" >/dev/null
+    partprobe "$target_disk" || true
+    sleep 2
+
+    # 等待分区节点出现
+    for i in 1 2 3 4 5; do
+        [[ -b "$part1" && -b "$part2" ]] && break
+        sleep 1
+    done
+
+    if [[ ! -b "$part1" || ! -b "$part2" ]]; then
+        echo "ERROR: Partitions not found after partitioning."
+        return 1
+    fi
+
+    echo "Formatting partitions..."
+    mkfs.vfat -F32 -n EFI "$part1"
+    mkfs.ext4 -F -L ROOT "$part2"
+
+    mount "$part2" "$mnt_root"
+    mount "$part1" "$mnt_esp"
+
+    echo "Copying ISO contents to disk (this may take a while)..."
+    # 复制 ISO 全部内容到 root 分区
+    cp -a "$mnt_iso"/. "$mnt_root"/
+
+    # 准备 EFI 目录
+    mkdir -p "$mnt_esp/EFI/BOOT" "$mnt_esp/EFI/grub" "$mnt_root/boot/grub"
+
+    # 若 ISO 自带 EFI 引导文件，优先拷贝一份兜底
+    if [[ -d "$mnt_iso/EFI" ]]; then
+        cp -a "$mnt_iso/EFI"/. "$mnt_esp/EFI/" 2>/dev/null || true
+    fi
+
+    # 安装 GRUB（BIOS + UEFI）
+    echo "Installing GRUB..."
+
+    # BIOS (i386-pc)
+    if command -v grub-install >/dev/null 2>&1; then
+        grub-install \
+            --target=i386-pc \
+            --boot-directory="$mnt_root/boot" \
+            --recheck \
+            "$target_disk" 2>/dev/null || \
+        echo "WARN: BIOS GRUB install failed (may still work on UEFI)."
+
+        # UEFI
+        grub-install \
+            --target=x86_64-efi \
+            --efi-directory="$mnt_esp" \
+            --boot-directory="$mnt_root/boot" \
+            --removable \
+            --recheck 2>/dev/null || \
+        echo "WARN: UEFI GRUB install failed."
+    else
+        echo "WARN: grub-install not found, trying to use ISO's own boot files only."
+    fi
+
+    # 生成一个尽量通用的 grub.cfg
+    cat > "$mnt_root/boot/grub/grub.cfg" << 'EOF'
+set timeout=5
+set default=0
+
+# 通用尝试：OpenWrt / 通用 Linux ISO 解包后的常见路径
+menuentry "Boot from installed system (auto)" {
+    insmod part_gpt
+    insmod ext2
+    insmod fat
+    insmod gzio
+    insmod xzio
+
+    # 常见内核路径（按优先级尝试）
+    if [ -f /boot/vmlinuz ] ; then
+        linux /boot/vmlinuz root=LABEL=ROOT rw
+        if [ -f /boot/initrd ] ; then
+            initrd /boot/initrd
+        elif [ -f /boot/initrd.img ] ; then
+            initrd /boot/initrd.img
+        elif [ -f /boot/initramfs ] ; then
+            initrd /boot/initramfs
+        fi
+    elif [ -f /boot/vmlinuz-* ] ; then
+        linux /boot/vmlinuz-* root=LABEL=ROOT rw
+        initrd /boot/initrd.img-*
+    elif [ -f /vmlinuz ] ; then
+        linux /vmlinuz root=LABEL=ROOT rw
+        if [ -f /initrd.img ] ; then
+            initrd /initrd.img
+        fi
+    else
+        echo "No known kernel found. Dropping to shell."
+        read
+    fi
+}
+
+menuentry "Reboot" {
+    reboot
+}
+
+menuentry "Power off" {
+    halt
+}
+EOF
+
+    # UEFI 默认启动项也指到同一份配置（若 grub-install 已写好可忽略）
+    if [[ ! -f "$mnt_esp/EFI/BOOT/BOOTX64.EFI" ]] && [[ -f "$mnt_root/boot/grub/x86_64-efi/core.efi" ]]; then
+        cp "$mnt_root/boot/grub/x86_64-efi/core.efi" "$mnt_esp/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
+    fi
+
+    sync
+    echo "ISO conversion finished."
+}
+
 install_image() {
     local target_disk image_size disk_size confirm model
 
@@ -123,7 +306,6 @@ install_image() {
         return 1
     fi
 
-    # Recheck mount status before writing.
     if has_mounted_filesystems "$target_disk"; then
         echo "Error: The target disk has mounted filesystems."
         echo "Refusing to write."
@@ -142,6 +324,11 @@ install_image() {
     echo "Disk model:  $model"
     echo "Disk size:   $disk_size bytes"
     echo "Image size:  $image_size bytes"
+    if is_iso_image "$IMAGE_FILE"; then
+        echo "Image type:  ISO (will convert to disk bootable)"
+    else
+        echo "Image type:  Raw disk image (dd)"
+    fi
     echo ""
 
     if (( disk_size < image_size )); then
@@ -161,28 +348,15 @@ install_image() {
         return 1
     fi
 
-    echo ""
-    echo "Writing image to $target_disk..."
-    echo "Do not power off the system."
-
-    if ! dd \
-        if="$IMAGE_FILE" \
-        of="$target_disk" \
-        bs=4M \
-        conv=fsync \
-        status=progress; then
-        echo ""
-        echo "ERROR: Image writing failed."
-        echo "The target disk may have been partially overwritten."
-        return 1
+    if is_iso_image "$IMAGE_FILE"; then
+        write_iso_as_bootable_disk "$target_disk"
+    else
+        write_raw_image "$target_disk"
     fi
-
-    sync
 
     echo ""
     echo "=========================================="
-    echo "Image writing command completed."
-    echo "Verify the target disk before rebooting."
+    echo "Operation completed."
     echo "Remove the installation media before booting"
     echo "from the target disk."
     echo "=========================================="
