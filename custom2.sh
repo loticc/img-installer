@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -39,36 +38,15 @@ mkdir -p imm output
 
 DOWNLOAD_FILE="$SCRIPT_DIR/imm/$filename"
 CUSTOM_IMAGE="$SCRIPT_DIR/imm/custom.img"
-ORIGINAL_OUTPUT="$SCRIPT_DIR/output/custom2-installer-x86_64.iso"
 FINAL_OUTPUT="$SCRIPT_DIR/output/custom2-installer-x86_64.iso"
 
 echo ""
-echo "检查构建输出文件："
-find "$SCRIPT_DIR/output" -maxdepth 1 -type f \
-    -printf '%f (%s bytes)\n' || true
-
-if [[ ! -s "$FINAL_OUTPUT" ]]; then
-    echo "错误：没有生成 Custom2 安装器 ISO。"
-    echo "请检查上方 Docker 构建日志，确认构建器是否成功。"
-    exit 1
-fi
-
-chmod 0644 "$FINAL_OUTPUT"
-
-sha256sum "$FINAL_OUTPUT" \
-    > "$FINAL_OUTPUT.sha256"
-
-echo ""
-echo "========================================"
-echo "Custom2 构建成功！"
-echo "========================================"
-
-ls -lh "$FINAL_OUTPUT" "$FINAL_OUTPUT.sha256"
 echo "========================================"
 echo "  Build Custom2 Image Installer ISO"
 echo "========================================"
 echo "下载地址：$DOWNLOAD_URL"
 echo "文件名称：$filename"
+echo "========================================"
 
 # Download the original image.
 # Do not disable TLS certificate verification.
@@ -130,7 +108,6 @@ case "$lower_filename" in
     *.iso)
         echo "检测到 ISO 文件。"
         echo "将 ISO 原样作为镜像载荷，不执行解压或格式转换。"
-
         cp -- "$DOWNLOAD_FILE" "$CUSTOM_IMAGE"
         ;;
 esac
@@ -145,7 +122,6 @@ echo "镜像准备完成："
 ls -lh "$CUSTOM_IMAGE"
 
 # Reuse the original Docker-based Debian Live builder.
-# The original custom.sh and build.sh are not edited.
 if ! command -v docker >/dev/null 2>&1; then
     echo "错误：未找到 Docker。"
     exit 1
@@ -158,16 +134,14 @@ docker run --privileged --rm \
     debian:buster \
     /supportFiles/custom2/build.sh
 
-# Rename the generated artifact so it cannot be confused
-# with a Release created by the original workflow.
-if [[ ! -s "$ORIGINAL_OUTPUT" ]]; then
-    echo "错误：原构建器没有生成预期的 ISO 文件。"
+# 构建完成后检查输出
+if [[ ! -s "$FINAL_OUTPUT" ]]; then
+    echo "错误：没有生成 Custom2 安装器 ISO。"
+    echo "请检查上方 Docker 构建日志，确认构建器是否成功。"
     exit 1
 fi
 
-mv -- "$ORIGINAL_OUTPUT" "$FINAL_OUTPUT"
 chmod 0644 "$FINAL_OUTPUT"
-
 sha256sum "$FINAL_OUTPUT" > "$FINAL_OUTPUT.sha256"
 
 echo ""
