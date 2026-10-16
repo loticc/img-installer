@@ -116,8 +116,8 @@ xorriso \
 
 echo Copy output
 cp -v "$HOME/LIVE_BOOT/debian-custom.iso" \
-  /output/custom2-installer-x86_64.iso
+    /output/custom2-installer-x86_64.iso
 
-chmod 644 /output/custom2-installer-x86_64.iso
-chmod -v 666 /output/custom-installer-x86_64.iso
+chmod 0644 /output/custom2-installer-x86_64.iso
+
 ls -lah /output
