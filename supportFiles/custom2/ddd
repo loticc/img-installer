@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -153,12 +152,11 @@ install_image() {
     echo "WARNING: ALL EXISTING DATA ON THE TARGET DISK"
     echo "MAY BE PERMANENTLY ERASED."
     echo ""
-    echo "To continue, type exactly:"
-    echo "ERASE $target_disk"
+    echo "To continue, type YES (case sensitive):"
 
     read -r -p "> " confirm </dev/tty
 
-    if [[ "$confirm" != "ERASE $target_disk" ]]; then
+    if [[ "$confirm" != "YES" ]]; then
         echo "Operation cancelled."
         return 1
     fi
