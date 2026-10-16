@@ -42,10 +42,22 @@ CUSTOM_IMAGE="$SCRIPT_DIR/imm/custom.img"
 ORIGINAL_OUTPUT="$SCRIPT_DIR/output/custom-installer-x86_64.iso"
 FINAL_OUTPUT="$SCRIPT_DIR/output/custom2-installer-x86_64.iso"
 
-# Remove stale output from previous runs
-rm -f "$CUSTOM_IMAGE" "$ORIGINAL_OUTPUT" \
-    "$FINAL_OUTPUT" "$FINAL_OUTPUT.sha256"
+if [[ ! -s "$FINAL_OUTPUT" ]]; then
+    echo "错误：没有生成 Custom2 安装器 ISO。"
+    exit 1
+fi
 
+chmod 0644 "$FINAL_OUTPUT"
+
+sha256sum "$FINAL_OUTPUT" \
+    > "$FINAL_OUTPUT.sha256"
+
+echo ""
+echo "========================================"
+echo "Custom2 构建成功！"
+echo "========================================"
+
+ls -lh "$FINAL_OUTPUT" "$FINAL_OUTPUT.sha256"
 echo "========================================"
 echo "  Build Custom2 Image Installer ISO"
 echo "========================================"
