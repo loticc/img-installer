@@ -1,0 +1,211 @@
+
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+IMAGE_FILE="/mnt/custom.img"
+LIVE_DISK=""
+
+show_menu() {
+    clear
+    echo "=========================================="
+    echo "       Custom2 Image Installer"
+    echo "=========================================="
+    echo "1. Write embedded IMG / ISO to disk"
+    echo "0. Quit"
+    echo "=========================================="
+}
+
+# Detect the physical disk containing the live installation medium.
+detect_live_disk() {
+    local src real typ parent
+
+    src="$(findmnt -rn -o SOURCE /run/live/medium 2>/dev/null | head -n1 || true)"
+    src="${src%%\[*}"
+
+    [[ -n "$src" && -b "$src" ]] || return 0
+
+    real="$(readlink -f -- "$src")"
+    typ="$(lsblk -dnro TYPE "$real" 2>/dev/null | head -n1 || true)"
+
+    case "$typ" in
+        disk)
+            LIVE_DISK="$real"
+            ;;
+        part)
+            parent="$(lsblk -dnro PKNAME "$real" 2>/dev/null | head -n1 || true)"
+            if [[ -n "$parent" ]]; then
+                LIVE_DISK="/dev/$parent"
+            fi
+            ;;
+    esac
+}
+
+# Return success if the disk or one of its partitions is mounted.
+has_mounted_filesystems() {
+    lsblk -nrpo MOUNTPOINT "$1" 2>/dev/null |
+        grep -qE '[^[:space:]]'
+}
+
+select_disk() {
+    local -a all_disks=()
+    local -a available_disks=()
+    local disk real size model choice
+
+    detect_live_disk
+
+    mapfile -t all_disks < <(
+        lsblk -dpnro NAME,RO,TYPE |
+        awk '$2 == 0 && $3 == "disk" {print $1}'
+    )
+
+    for disk in "${all_disks[@]}"; do
+        real="$(readlink -f -- "$disk")"
+
+        # Do not offer the known live boot disk.
+        if [[ -n "$LIVE_DISK" && "$real" == "$LIVE_DISK" ]]; then
+            echo "Skipping live boot disk: $disk" >&2
+            continue
+        fi
+
+        # Avoid writing to disks with mounted filesystems.
+        if has_mounted_filesystems "$disk"; then
+            echo "Skipping disk with mounted filesystems: $disk" >&2
+            continue
+        fi
+
+        available_disks+=("$disk")
+    done
+
+    if (( ${#available_disks[@]} == 0 )); then
+        echo "Error: No eligible target disks were found." >&2
+        return 1
+    fi
+
+    echo "" >&2
+    echo "Available target disks:" >&2
+
+    for i in "${!available_disks[@]}"; do
+        disk="${available_disks[$i]}"
+        size="$(lsblk -dnro SIZE "$disk")"
+        model="$(lsblk -dnro MODEL "$disk" | xargs)"
+
+        printf "%2d. %-15s %-12s %s\n" \
+            "$((i + 1))" "$disk" "$size" "$model" >&2
+    done
+
+    while true; do
+        read -r -p \
+            "Select target disk (1-${#available_disks[@]}): " \
+            choice </dev/tty
+
+        if [[ "$choice" =~ ^[0-9]+$ ]] &&
+           (( choice >= 1 && choice <= ${#available_disks[@]} )); then
+            printf '%s\n' "${available_disks[$((choice - 1))]}"
+            return 0
+        fi
+
+        echo "Invalid selection. Please try again." >&2
+    done
+}
+
+install_image() {
+    local target_disk image_size disk_size confirm model
+
+    if [[ ! -f "$IMAGE_FILE" || ! -s "$IMAGE_FILE" ]]; then
+        echo "Error: Embedded image is missing or empty:"
+        echo "$IMAGE_FILE"
+        return 1
+    fi
+
+    target_disk="$(select_disk)"
+
+    if [[ ! -b "$target_disk" ]]; then
+        echo "Error: Target is not a block device."
+        return 1
+    fi
+
+    # Recheck mount status before writing.
+    if has_mounted_filesystems "$target_disk"; then
+        echo "Error: The target disk has mounted filesystems."
+        echo "Refusing to write."
+        return 1
+    fi
+
+    image_size="$(stat -c '%s' "$IMAGE_FILE")"
+    disk_size="$(blockdev --getsize64 "$target_disk")"
+    model="$(lsblk -dnro MODEL "$target_disk" | xargs)"
+
+    echo ""
+    echo "=========================================="
+    echo "         WRITE CONFIRMATION"
+    echo "=========================================="
+    echo "Target disk: $target_disk"
+    echo "Disk model:  $model"
+    echo "Disk size:   $disk_size bytes"
+    echo "Image size:  $image_size bytes"
+    echo ""
+
+    if (( disk_size < image_size )); then
+        echo "Error: The target disk is smaller than the image."
+        return 1
+    fi
+
+    echo "WARNING: ALL EXISTING DATA ON THE TARGET DISK"
+    echo "MAY BE PERMANENTLY ERASED."
+    echo ""
+    echo "To continue, type exactly:"
+    echo "ERASE $target_disk"
+
+    read -r -p "> " confirm </dev/tty
+
+    if [[ "$confirm" != "ERASE $target_disk" ]]; then
+        echo "Operation cancelled."
+        return 1
+    fi
+
+    echo ""
+    echo "Writing image to $target_disk..."
+    echo "Do not power off the system."
+
+    if ! dd \
+        if="$IMAGE_FILE" \
+        of="$target_disk" \
+        bs=4M \
+        conv=fsync \
+        status=progress; then
+        echo ""
+        echo "ERROR: Image writing failed."
+        echo "The target disk may have been partially overwritten."
+        return 1
+    fi
+
+    sync
+
+    echo ""
+    echo "=========================================="
+    echo "Image writing command completed."
+    echo "Verify the target disk before rebooting."
+    echo "Remove the installation media before booting"
+    echo "from the target disk."
+    echo "=========================================="
+}
+
+while true; do
+    show_menu
+    read -r -p "Enter your choice [0-1]: " choice </dev/tty
+
+    case "$choice" in
+        1)
+            install_image
+            break
+            ;;
+        0)
+            echo "Exiting installer."
+            exit 0
+            ;;
+        *)
+            echo "Invalid option. Please try again."
+            sleep 2
+            ;;
+    esac
+done
