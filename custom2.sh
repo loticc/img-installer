@@ -18,9 +18,25 @@ if [[ ! "$DOWNLOAD_URL" =~ ^https://[^[:space:]]+$ ]]; then
 fi
 
 # Remove URL fragment and query string before extracting filename
-url_path="${DOWNLOAD_URL%%#*}"
-url_path="${url_path%%\?*}"
-filename="${url_path##*/}"
+url_no_frag="${DOWNLOAD_URL%%#*}"
+filename=""
+
+# 优先从查询参数里找（例如 ?n=/path/xxx.img.gz）
+if [[ "$url_no_frag" == *\?* ]]; then
+    query="${url_no_frag#*\?}"
+    # 尝试匹配常见参数中的文件名
+    if [[ "$query" =~ ([^&=]+)\.(img\.gz|img\.xz|img\.zip|iso) ]]; then
+        filename="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+        filename="${filename##*/}"   # 去掉可能的路径前缀
+    fi
+fi
+
+# 如果查询参数里没找到，再从路径取
+if [[ -z "$filename" ]]; then
+    url_path="${url_no_frag%%\?*}"
+    filename="${url_path##*/}"
+fi
+
 lower_filename="${filename,,}"
 
 case "$lower_filename" in
@@ -28,6 +44,7 @@ case "$lower_filename" in
         ;;
     *)
         echo "错误：只支持 .img.gz、.img.xz、.img.zip 和 .iso。"
+        echo "当前解析到的文件名：$filename"
         exit 1
         ;;
 esac
