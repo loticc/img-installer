@@ -48,18 +48,14 @@ jobs:
             exit 1
           fi
 
-          url_path="${DOWNLOAD_URL%%#*}"
-          url_path="${url_path%%\?*}"
+          url_lower="${DOWNLOAD_URL,,}"
 
-          case "${url_path,,}" in
-            *.img.gz|*.img.xz|*.img.zip|*.iso)
-              echo "镜像地址格式检查通过。"
-              ;;
-            *)
-              echo "错误：仅支持 .img.gz、.img.xz、.img.zip 和 .iso。"
-              exit 1
-              ;;
-          esac
+          if [[ "$url_lower" =~ \.(img\.gz|img\.xz|img\.zip|iso)([?#]|$) ]]; then
+            echo "镜像地址格式检查通过。"
+          else
+            echo "错误：仅支持 .img.gz、.img.xz、.img.zip 和 .iso。"
+            exit 1
+          fi
 
       - name: Build Custom2 Image Installer
         env:
