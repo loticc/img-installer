@@ -32,6 +32,9 @@ cp -v /supportFiles/custom2/installChroot.sh \
 cp -v /supportFiles/custom2/ddd \
   "$HOME/LIVE_BOOT/chroot/usr/bin/ddd"
 chmod +x $HOME/LIVE_BOOT/chroot/usr/bin/ddd
+cp -v /supportFiles/custom2/extroot.sh \
+  "$HOME/LIVE_BOOT/chroot/usr/bin/extroot"
+chmod +x $HOME/LIVE_BOOT/chroot/usr/bin/extroot
 cp -v /supportFiles/sources.list $HOME/LIVE_BOOT/chroot/etc/apt/sources.list
 
 echo Mounting dev / proc / sys
