@@ -12,8 +12,8 @@ fi
 DOWNLOAD_URL="$1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ ! "$DOWNLOAD_URL" =~ ^https://[^[:space:]]+$ ]]; then
-    echo "错误：只支持 HTTPS 下载地址。"
+if [[ ! "$DOWNLOAD_URL" =~ ^(http|https)://[^[:space:]]+$ ]]; then
+    echo "错误：只支持 HTTP / HTTPS 下载地址。"
     exit 1
 fi
 
@@ -25,7 +25,7 @@ filename=""
 if [[ "$url_no_frag" == *\?* ]]; then
     query="${url_no_frag#*\?}"
     # 尝试匹配常见参数中的文件名
-    if [[ "$query" =~ ([^&=]+)\.(img\.gz|img\.xz|img\.zip|iso) ]]; then
+    if [[ "$query" =~ ([^&=]+)\.(img\.gz|img\.xz|img\.zip) ]]; then
         filename="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
         filename="${filename##*/}"   # 去掉可能的路径前缀
     fi
@@ -40,10 +40,10 @@ fi
 lower_filename="${filename,,}"
 
 case "$lower_filename" in
-    *.img.gz|*.img.xz|*.img.zip|*.iso)
+    *.img.gz|*.img.xz|*.img.zip)
         ;;
     *)
-        echo "错误：只支持 .img.gz、.img.xz、.img.zip 和 .iso。"
+        echo "错误：只支持 .img.gz、.img.xz 和 .img.zip。"
         echo "当前解析到的文件名：$filename"
         exit 1
         ;;
@@ -66,13 +66,14 @@ echo "文件名称：$filename"
 echo "========================================"
 
 # Download the original image.
-# Do not disable TLS certificate verification.
+# TLS verification stays on; both http:// and https:// are allowed,
+# and https -> http redirects are permitted for mirrors that downgrade.
 if ! curl \
     --fail \
     --show-error \
     --location \
-    --proto '=https' \
-    --proto-redir '=https' \
+    --proto '=http,https' \
+    --proto-redir '=http,https' \
     --retry 3 \
     --connect-timeout 20 \
     --max-time 3600 \
@@ -120,12 +121,6 @@ case "$lower_filename" in
 
         unzip -p "$DOWNLOAD_FILE" "${img_entries[0]}" \
             > "$CUSTOM_IMAGE"
-        ;;
-
-    *.iso)
-        echo "检测到 ISO 文件。"
-        echo "将 ISO 原样作为镜像载荷，不执行解压或格式转换。"
-        cp -- "$DOWNLOAD_FILE" "$CUSTOM_IMAGE"
         ;;
 esac
 
