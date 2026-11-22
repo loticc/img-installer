@@ -63,9 +63,16 @@ umount $HOME/LIVE_BOOT/chroot/sys
 echo Create directories that will contain files for our live environment files and scratch files.
 mkdir -p $HOME/LIVE_BOOT/{staging/{EFI/boot,boot/grub/x86_64-efi,isolinux,live},tmp}
 
+echo Patch payload image: make /etc/uci-defaults/99-custom.sh idempotent
+# 说明：/mnt/custom.img 是只读挂载，所以先拷进 chroot/mnt，再对副本原地打补丁。
+# 补丁只改镜像 p2(rootfs/squashfs) 里的 99-custom.sh，不改分区表，不影响可启动性。
+cp -v /mnt/custom.img ${HOME}/LIVE_BOOT/chroot/mnt/custom.img
+cp -v /supportFiles/custom2/patch-image.sh ${HOME}/LIVE_BOOT/tmp/patch-image.sh
+chmod +x ${HOME}/LIVE_BOOT/tmp/patch-image.sh
+${HOME}/LIVE_BOOT/tmp/patch-image.sh ${HOME}/LIVE_BOOT/chroot/mnt/custom.img
+
 echo Compress the chroot environment into a Squash filesystem.
-cp /mnt/custom.img ${HOME}/LIVE_BOOT/chroot/mnt/
-ls ${HOME}/LIVE_BOOT/chroot/mnt/
+ls -lh ${HOME}/LIVE_BOOT/chroot/mnt/
 mksquashfs $HOME/LIVE_BOOT/chroot $HOME/LIVE_BOOT/staging/live/filesystem.squashfs -e boot
 
 echo Copy kernel and initrd
