@@ -1,0 +1,84 @@
+#!/bin/sh /etc/rc.common
+# ==========================================================================
+#  extroot-autogrow  ——  开机自动把独立 overlay 分区扩到磁盘尾部
+#
+#  用途：虚拟机/物理机把磁盘加大以后，重启一次，/overlay 自动跟着变大，
+#        不用再手工 parted + resize2fs。
+#
+#  安装（一次性）：
+#     wget -qO /etc/init.d/extroot-autogrow <脚本链接>
+#     chmod +x /etc/init.d/extroot-autogrow
+#     /etc/init.d/extroot-autogrow enable
+#     /etc/init.d/extroot-autogrow start
+#
+#  依赖：parted、resize2fs（装一次即可）
+#     apk add parted e2fsprogs-extra        # apk 系统
+#     opkg install parted e2fsprogs         # opkg 系统
+#
+#  行为：
+#     · 只有当 /overlay 已经挂在独立分区上时才动手（没迁移就跳过，交给你手动执行）
+#     · 只有尾部空闲 >= 1GiB 才扩容，避免为了几 MB 反复改分区表
+#     · 全程只做“分区变长 + 文件系统在线变大”，不移动分区起点、不格式化
+#     · 日志：logread -t extroot
+# ==========================================================================
+
+START=95
+LOG_TAG=extroot
+
+log() { logger -t "$LOG_TAG" "$*" 2>/dev/null || true; }
+
+find_overlay_part() {
+    _mm=$(awk '$5=="/overlay"{print $3}' /proc/self/mountinfo 2>/dev/null | head -n1)
+    [ -n "${_mm:-}" ] || return 1
+    for _f in /sys/class/block/*/dev; do
+        [ -r "$_f" ] || continue
+        if [ "$(cat "$_f" 2>/dev/null)" = "$_mm" ]; then
+            printf '/dev/%s' "$(basename "$(dirname "$_f")")"
+            return 0
+        fi
+    done
+    return 1
+}
+
+start() {
+    PART=$(find_overlay_part) || { log "overlay 不是独立块设备（还在镜像内部），跳过"; return 0; }
+    [ -b "$PART" ] || { log "找不到 $PART"; return 0; }
+
+    NAME="${PART##*/}"
+    PARENT=$(dirname "$(readlink -f "/sys/class/block/$NAME" 2>/dev/null)")
+    [ -d "$PARENT" ] || { log "读不到 $PART 的父设备"; return 0; }
+    DISK="/dev/$(basename "$PARENT")"
+
+    DSZ=$(cat "/sys/class/block/$(basename "$PARENT")/size" 2>/dev/null)
+    ST=$(cat "/sys/class/block/$NAME/start" 2>/dev/null)
+    SZ=$(cat "/sys/class/block/$NAME/size" 2>/dev/null)
+    [ -n "$DSZ" ] && [ -n "$ST" ] && [ -n "$SZ" ] || { log "读不到分区信息"; return 0; }
+
+    FREE=$(( DSZ - 34 - ST - SZ ))     # 34 扇区留给 GPT 备份表
+    if [ "$FREE" -lt 2097152 ]; then   # 少于 1GiB 不动
+        log "$PART 尾部可用 $(( FREE / 2048 ))MiB，未到 1GiB 阈值，跳过"
+        return 0
+    fi
+
+    # 分区号：取设备名结尾的数字（vda3 / sda3 / nvme0n1p3 / mmcblk0p3 都适用）
+    PNUM=$(printf '%s' "$NAME" | grep -o '[0-9][0-9]*$' | head -n1)
+    [ -n "$PNUM" ] || { log "解析分区号失败: $NAME"; return 0; }
+
+    command -v parted >/dev/null 2>&1 || { log "缺少 parted，跳过（apk add parted）"; return 0; }
+    command -v resize2fs >/dev/null 2>&1 || { log "缺少 resize2fs，跳过（apk add e2fsprogs-extra）"; return 0; }
+
+    log "扩容开始：$PART 尾部空闲 $(( FREE / 2048 ))MiB"
+    if ! parted -s "$DISK" resizepart "$PNUM" 100% 2>/dev/null; then
+        log "parted 扩容失败（磁盘尾部可能有其它分区），跳过"
+        return 0
+    fi
+    partprobe "$DISK" >/dev/null 2>&1 || true
+    sleep 1
+    if resize2fs "$PART" >/dev/null 2>&1; then
+        log "扩容完成：$PART 现为 $(cat "/sys/class/block/$NAME/size") 扇区"
+    else
+        log "resize2fs 失败（可能有待重启的挂载），下次开机再试"
+    fi
+}
+
+stop() { :; }
