@@ -5,10 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       download_url:
-        description: "请输入镜像下载地址（.img.gz/.img.xz/.img.zip/.iso）"
+        description: "请输入镜像下载地址（.img.gz / .img.xz / .img.zip，支持 http:// 与 https://）"
         required: true
         type: string
-        default: "https://default.example.com/file.iso"
+        default: "https://default.example.com/file.img.gz"
 
 permissions:
   contents: write
@@ -38,22 +38,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$DOWNLOAD_URL" == "https://default.example.com/file.iso" ]]; then
+          if [[ "$DOWNLOAD_URL" == "https://default.example.com/file.img.gz" ]]; then
             echo "错误：请填写实际的镜像下载地址。"
             exit 1
           fi
 
-          if [[ ! "$DOWNLOAD_URL" =~ ^https://[^[:space:]]+$ ]]; then
-            echo "错误：下载地址必须使用 HTTPS。"
+          if [[ ! "$DOWNLOAD_URL" =~ ^(http|https)://[^[:space:]]+$ ]]; then
+            echo "错误：下载地址必须以 http:// 或 https:// 开头。"
             exit 1
           fi
 
           url_lower="${DOWNLOAD_URL,,}"
 
-          if [[ "$url_lower" =~ \.(img\.gz|img\.xz|img\.zip|iso)([?#]|$) ]]; then
+          if [[ "$url_lower" =~ \.(img\.gz|img\.xz|img\.zip)([?#]|$) ]]; then
             echo "镜像地址格式检查通过。"
           else
-            echo "错误：仅支持 .img.gz、.img.xz、.img.zip 和 .iso。"
+            echo "错误：仅支持 .img.gz、.img.xz 和 .img.zip。"
             exit 1
           fi
 
@@ -82,7 +82,8 @@ jobs:
             - .img.gz
             - .img.xz
             - .img.zip
-            - .iso
+
+            Source URL may use http:// or https://.
 
             The embedded payload is written directly to the selected target disk.
             All existing data on the target disk may be erased.
